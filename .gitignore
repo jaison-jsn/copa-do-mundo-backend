@@ -1,0 +1,15 @@
+# Python-generated files
+__pycache__/
+*.py[oc]
+build/
+dist/
+wheels/
+*.egg-info
+
+# Virtual environments
+.venv
+
+# Variáveis de ambiente (NUNCA versionar: contém a chave da Groq)
+.env
+.env.*
+!.env.example
