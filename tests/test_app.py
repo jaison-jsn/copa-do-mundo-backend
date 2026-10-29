@@ -123,3 +123,22 @@ def test_prompt_exige_linha_de_link():
 def test_edicoes_tem_link_oficial():
     for e in app_module.FATOS["edicoes"]:
         assert e.get("link", "").startswith("https://"), f"edição {e['ano']} sem link"
+
+
+def test_classificar_tema():
+    assert app_module.classificar_tema("Quem foi campeão em 1994?") == "campeoes"
+    assert app_module.classificar_tema("Onde foi a Copa de 2010?") == "sedes"
+    assert app_module.classificar_tema("Quem é o maior artilheiro?") == "artilheiros"
+    assert app_module.classificar_tema("Qual a cor do uniforme?") == "outros"
+
+
+def test_painel_uso_protegido(cliente, monkeypatch):
+    monkeypatch.delenv("PAINEL_TOKEN", raising=False)
+    assert cliente.get("/api/uso").status_code == 404
+    monkeypatch.setenv("PAINEL_TOKEN", "segredo-de-teste")
+    assert cliente.get("/api/uso").status_code == 401
+    assert cliente.get("/api/uso", headers={"X-Painel-Token": "errado"}).status_code == 401
+    resp = cliente.get("/api/uso", headers={"X-Painel-Token": "segredo-de-teste"})
+    assert resp.status_code == 200
+    dados = resp.get_json()
+    assert "taxa_recusa" in dados and "temas" in dados and "dias" in dados
