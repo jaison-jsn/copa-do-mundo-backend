@@ -70,7 +70,13 @@ def chat():
         app.logger.error("Falha na chamada à Groq (modelo=%s): %s: %s", MODEL, type(erro).__name__, erro)
         return jsonify(erro="Falha ao consultar o modelo. Tente novamente."), 502
 
-    return jsonify(resposta=resposta.choices[0].message.content)
+    conteudo = resposta.choices[0].message.content or ""
+
+    # Registra perguntas recusadas nos logs, para orientar a expansão da base.
+    if conteudo.strip().startswith(RECUSA):
+        app.logger.info("PERGUNTA_RECUSADA: %s", mensagem)
+
+    return jsonify(resposta=conteudo)
 
 
 if __name__ == "__main__":
