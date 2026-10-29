@@ -65,7 +65,9 @@ def chat():
         )
     except RuntimeError as erro:
         return jsonify(erro=str(erro)), 500
-    except Exception:
+    except Exception as erro:
+        # Registra o tipo e a mensagem do erro nos logs do servidor (sem expor a chave).
+        app.logger.error("Falha na chamada à Groq (modelo=%s): %s: %s", MODEL, type(erro).__name__, erro)
         return jsonify(erro="Falha ao consultar o modelo. Tente novamente."), 502
 
     return jsonify(resposta=resposta.choices[0].message.content)
