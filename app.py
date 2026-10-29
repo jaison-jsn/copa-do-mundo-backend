@@ -22,7 +22,7 @@ MAX_CARACTERES = 500
 app = Flask(__name__)
 CORS(app, origins=[os.getenv("FRONTEND_ORIGIN", "*")])
 
-MODEL = os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile")
+MODEL = os.getenv("GROQ_MODEL", "openai/gpt-oss-120b")
 _client = None
 
 
