@@ -84,3 +84,32 @@ def test_todos_os_registros_tem_fonte():
         assert e.get("fonte"), f"edição {e['ano']} sem fonte"
     for s in app_module.FATOS["selecoes"]:
         assert s.get("fonte"), f"seleção {s['selecao']} sem fonte"
+
+
+def test_lista_de_edicoes_traz_artilheiro_e_bola_de_ouro(cliente):
+    r = cliente.get("/api/edicoes")
+    assert r.status_code == 200
+    edicoes = r.get_json()["edicoes"]
+    assert len(edicoes) == 23
+    ed1994 = next(e for e in edicoes if e["ano"] == 1994)
+    assert ed1994["campeao"] == "Brasil"
+    assert ed1994["bola_de_ouro"] == "Romário (Brasil)"
+
+
+def test_detalhe_de_edicao_existente_e_inexistente(cliente):
+    assert cliente.get("/api/edicoes/2002").get_json()["campeao"] == "Brasil"
+    assert cliente.get("/api/edicoes/1999").status_code == 404
+
+
+def test_lista_e_detalhe_de_selecoes(cliente):
+    lista = cliente.get("/api/selecoes").get_json()["selecoes"]
+    assert any(s["selecao"] == "Brasil" for s in lista)
+    r = cliente.get("/api/selecoes/Brasil")
+    assert r.status_code == 200
+    assert r.get_json()["titulos"] == [1958, 1962, 1970, 1994, 2002]
+    assert cliente.get("/api/selecoes/Atlantis").status_code == 404
+
+
+def test_detalhe_de_selecao_com_barra_no_nome(cliente):
+    r = cliente.get("/api/selecoes/União Soviética / Rússia")
+    assert r.status_code == 200

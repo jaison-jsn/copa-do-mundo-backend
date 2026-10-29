@@ -42,6 +42,46 @@ def health():
     return jsonify(status="ok", edicoes_na_base=len(FATOS.get("edicoes", [])))
 
 
+def _edicao_completa(edicao):
+    """Junta os dados da edição com artilheiro e Bola de Ouro, quando existirem."""
+    jogadores = {j["ano"]: j for j in FATOS.get("jogadores", [])}
+    j = jogadores.get(edicao["ano"], {})
+    return {
+        **edicao,
+        "artilheiro": j.get("artilheiro"),
+        "gols_artilheiro": j.get("gols"),
+        "bola_de_ouro": j.get("bola_de_ouro"),
+        "obs_artilheiro": j.get("obs"),
+    }
+
+
+@app.get("/api/edicoes")
+def listar_edicoes():
+    return jsonify(edicoes=[_edicao_completa(e) for e in FATOS.get("edicoes", [])])
+
+
+@app.get("/api/edicoes/<int:ano>")
+def detalhe_edicao(ano):
+    for e in FATOS.get("edicoes", []):
+        if e["ano"] == ano:
+            return jsonify(_edicao_completa(e))
+    return jsonify(erro=f"Edição de {ano} não encontrada na base."), 404
+
+
+@app.get("/api/selecoes")
+def listar_selecoes():
+    return jsonify(selecoes=FATOS.get("selecoes", []))
+
+
+@app.get("/api/selecoes/<path:nome>")
+def detalhe_selecao(nome):
+    alvo = nome.strip().lower()
+    for s in FATOS.get("selecoes", []):
+        if s["selecao"].lower() == alvo:
+            return jsonify(s)
+    return jsonify(erro=f"Seleção '{nome}' não encontrada na base."), 404
+
+
 @app.post("/api/chat")
 def chat():
     data = request.get_json(silent=True) or {}
