@@ -73,3 +73,14 @@ def test_arquivo_de_avaliacao_tem_perguntas_validas():
     assert len(perguntas) >= 30
     for item in perguntas:
         assert ("deve_conter" in item) != ("deve_recusar" in item), item["pergunta"]
+
+
+def test_prompt_exige_linha_de_fonte():
+    assert 'linha começando por "Fonte:"' in app_module.SYSTEM_PROMPT
+
+
+def test_todos_os_registros_tem_fonte():
+    for e in app_module.FATOS["edicoes"]:
+        assert e.get("fonte"), f"edição {e['ano']} sem fonte"
+    for s in app_module.FATOS["selecoes"]:
+        assert s.get("fonte"), f"seleção {s['selecao']} sem fonte"
