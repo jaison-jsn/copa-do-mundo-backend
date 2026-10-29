@@ -113,3 +113,13 @@ def test_lista_e_detalhe_de_selecoes(cliente):
 def test_detalhe_de_selecao_com_barra_no_nome(cliente):
     r = cliente.get("/api/selecoes/União Soviética / Rússia")
     assert r.status_code == 200
+
+
+def test_prompt_exige_linha_de_link():
+    texto = Path("prompts/system_prompt.txt").read_text(encoding="utf-8")
+    assert 'linha começando por "Link:"' in texto
+
+
+def test_edicoes_tem_link_oficial():
+    for e in app_module.FATOS["edicoes"]:
+        assert e.get("link", "").startswith("https://"), f"edição {e['ano']} sem link"
