@@ -54,3 +54,20 @@ Cada push na branch `main` dispara um novo deploy automaticamente.
 
 - No plano gratuito, o serviço hiberna após um período sem uso. A primeira requisição pode demorar cerca de 50 segundos.
 - A resposta do modelo depende da base de fatos. Dados ausentes da base devem ser tratados como "não confirmado", e não preenchidos por suposição.
+
+## Variáveis opcionais
+
+| Variável | Padrão | Para que serve |
+|---|---|---|
+| `PAINEL_TOKEN` | vazio | Liga o painel de uso em `/api/uso`. Sem ela, a rota responde 404. |
+| `LIMITE_CHAT` | `20 per minute` | Limite de perguntas por IP em `/api/chat`. |
+| `LIMITE_ATIVO` | `1` | Use `0` para desligar o limite. |
+| `FLASK_DEBUG` | `0` | Use `1` só em desenvolvimento local. |
+
+## Validar a base
+
+```bash
+uv run python scripts/validar_base.py
+```
+
+O mesmo script e os testes rodam no GitHub Actions a cada push (`.github/workflows/testes.yml`).

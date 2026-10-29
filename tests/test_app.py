@@ -14,9 +14,36 @@ import app as app_module  # noqa: E402
 def cliente(monkeypatch):
     monkeypatch.delenv("GROQ_API_KEY", raising=False)
     monkeypatch.setattr(app_module, "_client", None)
+    monkeypatch.setattr(app_module, "_cache", app_module.OrderedDict())
+    app_module.limiter.enabled = False
+    app_module.limiter.reset()
     app_module.app.config.update(TESTING=True)
     with app_module.app.test_client() as c:
         yield c
+    app_module.limiter.enabled = False
+    app_module.limiter.reset()
+
+
+class _ClienteFalso:
+    """Imita o cliente da Groq: conta as chamadas e devolve um texto fixo."""
+
+    def __init__(self, texto):
+        self.texto = texto
+        self.chamadas = 0
+        self.chat = self
+        self.completions = self
+
+    def create(self, **_kwargs):
+        self.chamadas += 1
+        mensagem = type("M", (), {"content": self.texto})()
+        escolha = type("E", (), {"message": mensagem})()
+        return type("R", (), {"choices": [escolha]})()
+
+
+def _usar_cliente_falso(monkeypatch, texto):
+    falso = _ClienteFalso(texto)
+    monkeypatch.setattr(app_module, "get_client", lambda: falso)
+    return falso
 
 
 def test_health_retorna_ok_e_edicoes(cliente):
@@ -142,3 +169,31 @@ def test_painel_uso_protegido(cliente, monkeypatch):
     assert resp.status_code == 200
     dados = resp.get_json()
     assert "taxa_recusa" in dados and "temas" in dados and "dias" in dados
+
+
+def test_cache_evita_nova_chamada(cliente, monkeypatch):
+    falso = _usar_cliente_falso(monkeypatch, "Resposta de teste.")
+    primeira = cliente.post("/api/chat", json={"mensagem": "Quem foi campeão em 1994?"})
+    segunda = cliente.post("/api/chat", json={"mensagem": "  quem foi   CAMPEÃO em 1994? "})
+    assert primeira.get_json()["resposta"] == "Resposta de teste."
+    assert segunda.get_json()["cache"] is True
+    assert falso.chamadas == 1
+
+
+def test_recusa_conta_no_painel(cliente, monkeypatch):
+    monkeypatch.setenv("PAINEL_TOKEN", "segredo-de-teste")
+    _usar_cliente_falso(monkeypatch, app_module.RECUSA)
+    cliente.post("/api/chat", json={"mensagem": "Qual a receita de bolo?"})
+    dados = cliente.get("/api/uso", headers={"X-Painel-Token": "segredo-de-teste"}).get_json()
+    assert dados["taxa_recusa"] > 0
+
+
+def test_limite_por_ip_responde_429(cliente, monkeypatch):
+    _usar_cliente_falso(monkeypatch, "ok")
+    app_module.limiter.enabled = True
+    codigos = [
+        cliente.post("/api/chat", json={"mensagem": f"pergunta número {i}"}).status_code
+        for i in range(21)
+    ]
+    assert codigos[:20] == [200] * 20
+    assert codigos[20] == 429

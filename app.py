@@ -2,13 +2,17 @@ import hmac
 import json
 import os
 import threading
+from collections import OrderedDict
 from datetime import datetime, timezone
 from pathlib import Path
 
 from dotenv import load_dotenv
 from flask import Flask, jsonify, request
 from flask_cors import CORS
+from flask_limiter import Limiter
+from flask_limiter.util import get_remote_address
 from groq import Groq
+from werkzeug.middleware.proxy_fix import ProxyFix
 
 load_dotenv()
 
@@ -23,7 +27,27 @@ RECUSA = (
 MAX_CARACTERES = 500
 
 app = Flask(__name__)
+# Atrás do proxy do Render, o IP real do cliente vem no cabeçalho X-Forwarded-For.
+app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1)
 CORS(app, origins=[os.getenv("FRONTEND_ORIGIN", "*")])
+
+# Limite de perguntas por IP (item 9). Pode ser ajustado ou desligado por variável de ambiente.
+limiter = Limiter(
+    get_remote_address,
+    app=app,
+    storage_uri="memory://",
+    enabled=os.getenv("LIMITE_ATIVO", "1") == "1",
+)
+LIMITE_CHAT = os.getenv("LIMITE_CHAT", "20 per minute")
+
+# Cache de respostas (item 10): perguntas repetidas não chamam a Groq de novo.
+_CACHE_MAX = 200
+_cache = OrderedDict()
+_cache_lock = threading.Lock()
+
+
+def _chave_cache(mensagem):
+    return " ".join(mensagem.lower().split())
 
 MODEL = os.getenv("GROQ_MODEL", "openai/gpt-oss-120b")
 _client = None
@@ -147,7 +171,13 @@ def detalhe_selecao(nome):
     return jsonify(erro=f"Seleção '{nome}' não encontrada na base."), 404
 
 
+@app.errorhandler(429)
+def limite_excedido(_erro):
+    return jsonify(erro="Muitas perguntas em pouco tempo. Aguarde um minuto e tente novamente."), 429
+
+
 @app.post("/api/chat")
+@limiter.limit(LIMITE_CHAT)
 def chat():
     data = request.get_json(silent=True) or {}
     mensagem = (data.get("mensagem") or "").strip()
@@ -156,6 +186,12 @@ def chat():
         return jsonify(erro="Mensagem vazia."), 400
     if len(mensagem) > MAX_CARACTERES:
         return jsonify(erro=f"Mensagem muito longa (máx. {MAX_CARACTERES} caracteres)."), 400
+
+    chave = _chave_cache(mensagem)
+    with _cache_lock:
+        if chave in _cache:
+            _cache.move_to_end(chave)
+            return jsonify(resposta=_cache[chave], cache=True)
 
     contexto = "\n\n# BASE DE FATOS\n" + json.dumps(FATOS, ensure_ascii=False)
 
@@ -186,8 +222,14 @@ def chat():
     else:
         registrar_uso(mensagem, "respondida")
 
+    with _cache_lock:
+        _cache[chave] = conteudo
+        _cache.move_to_end(chave)
+        while len(_cache) > _CACHE_MAX:
+            _cache.popitem(last=False)
+
     return jsonify(resposta=conteudo)
 
 
 if __name__ == "__main__":
-    app.run(debug=True, port=5000)
+    app.run(debug=os.getenv("FLASK_DEBUG", "0") == "1", port=5000)

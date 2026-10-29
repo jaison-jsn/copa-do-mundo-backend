@@ -1,0 +1,19 @@
+name: Testes
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  testes:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+      - name: Instalar dependências
+        run: uv sync --frozen
+      - name: Validar a base de fatos
+        run: uv run python scripts/validar_base.py
+      - name: Rodar os testes
+        run: uv run pytest -q
