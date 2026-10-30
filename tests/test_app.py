@@ -1,5 +1,6 @@
 """Testes locais das rotas. Não chamam a API da Groq."""
 
+import json
 import sys
 from pathlib import Path
 
@@ -197,3 +198,38 @@ def test_limite_por_ip_responde_429(cliente, monkeypatch):
     ]
     assert codigos[:20] == [200] * 20
     assert codigos[20] == 429
+
+
+def test_recorte_por_ano_envia_so_o_ano_pedido():
+    c = app_module.montar_contexto("Quem foi campeão em 1994?")
+    assert [e["ano"] for e in c["edicoes"]] == [1994]
+    assert [j["ano"] for j in c["jogadores"]] == [1994]
+
+
+def test_recorte_por_jogador_encontra_o_ano():
+    c = app_module.montar_contexto("Quem foi o Romário?")
+    assert 1994 in [j["ano"] for j in c["jogadores"]]
+
+
+def test_pergunta_geral_recebe_resumo_compacto():
+    c = app_module.montar_contexto("Qual seleção tem mais títulos?")
+    assert len(c["edicoes"]) == 23
+    assert len(c["selecoes"]) == 25
+    assert len(json.dumps(c, ensure_ascii=False)) < 12000
+
+
+def test_chat_envia_recorte_e_limita_resposta(cliente, monkeypatch):
+    capturado = {}
+
+    class _Falso(_ClienteFalso):
+        def create(self, **kwargs):
+            capturado.update(kwargs)
+            return super().create(**kwargs)
+
+    falso = _Falso("ok")
+    monkeypatch.setattr(app_module, "get_client", lambda: falso)
+    cliente.post("/api/chat", json={"mensagem": "Quem foi campeão em 1994?"})
+    assert capturado["max_completion_tokens"] == 1500
+    sistema = capturado["messages"][0]["content"]
+    assert '"ano": 1994' in sistema
+    assert '"ano": 1930' not in sistema

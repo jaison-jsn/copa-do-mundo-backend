@@ -1,7 +1,9 @@
 import hmac
 import json
 import os
+import re
 import threading
+import unicodedata
 from collections import OrderedDict
 from datetime import datetime, timezone
 from pathlib import Path
@@ -144,6 +146,88 @@ def _edicao_completa(edicao):
     }
 
 
+# ----- Recorte da base enviado ao modelo (item 7) -----
+# O plano gratuito da Groq limita os tokens por minuto. Por isso, cada pergunta
+# recebe só os registros relacionados a ela. Perguntas gerais recebem um resumo.
+
+def _normalizar(texto):
+    sem_acento = unicodedata.normalize("NFKD", str(texto))
+    sem_acento = "".join(c for c in sem_acento if not unicodedata.combining(c))
+    return " ".join(sem_acento.lower().split())
+
+
+def _menciona(texto_norm, termo_norm):
+    if not termo_norm:
+        return False
+    return re.search(r"(?<![a-z0-9])" + re.escape(termo_norm) + r"(?![a-z0-9])", texto_norm) is not None
+
+
+def _campos(registro, campos):
+    return {c: registro[c] for c in campos if c in registro}
+
+
+def montar_contexto(mensagem):
+    """Devolve só os registros da base relacionados à pergunta."""
+    texto = _normalizar(mensagem)
+    edicoes = FATOS.get("edicoes", [])
+    jogadores = FATOS.get("jogadores", [])
+    selecoes = FATOS.get("selecoes", [])
+    descricao = FATOS.get("meta", {}).get("descricao", "")
+
+    anos_base = {e["ano"] for e in edicoes}
+    anos_pedidos = {int(a) for a in re.findall(r"(?<!\d)(19[3-9]\d|20[0-2]\d)(?!\d)", mensagem)}
+    anos = anos_pedidos & anos_base
+
+    # Seleções citadas: nomes da seção de seleções e os que aparecem como campeão ou vice.
+    nomes_conhecidos = {_normalizar(s["selecao"]) for s in selecoes}
+    for e in edicoes:
+        nomes_conhecidos.add(_normalizar(e["campeao"]))
+        nomes_conhecidos.add(_normalizar(e["vice"]))
+    citadas = {n for n in nomes_conhecidos if _menciona(texto, n)}
+
+    if citadas:
+        for e in edicoes:
+            if _normalizar(e["campeao"]) in citadas or _normalizar(e["vice"]) in citadas:
+                anos.add(e["ano"])
+
+    # Jogadores citados, pelo nome completo ou por uma parte do nome com 4 letras ou mais.
+    for j in jogadores:
+        for bruto in (j.get("artilheiro") or []) + ([j["bola_de_ouro"]] if j.get("bola_de_ouro") else []):
+            completo = bruto.split("(")[0].strip()
+            partes = [_normalizar(p) for p in completo.split()]
+            if _menciona(texto, _normalizar(completo)) or any(len(p) >= 4 and _menciona(texto, p) for p in partes):
+                if j["ano"] in anos_base:
+                    anos.add(j["ano"])
+
+    if not anos and not citadas:
+        # Pergunta geral: resumo da base inteira, sem links, para caber no limite.
+        return {
+            "descricao": descricao,
+            "observacao_recorte": "Resumo geral da base, com os campos essenciais de cada registro.",
+            "edicoes": [_campos(e, ["ano", "sede", "campeao", "vice", "placar_final"]) for e in edicoes],
+            "jogadores": [_campos(j, ["ano", "artilheiro", "gols", "bola_de_ouro"]) for j in jogadores],
+            "selecoes": [
+                _campos(s, ["selecao", "participacoes", "titulos", "vices", "terceiros", "quartos"])
+                for s in selecoes
+            ],
+        }
+
+    edicoes_sel = [e for e in edicoes if e["ano"] in anos]
+    nomes_sel = {_normalizar(e["campeao"]) for e in edicoes_sel} | {_normalizar(e["vice"]) for e in edicoes_sel}
+    selecoes_sel = [
+        s for s in selecoes
+        if _normalizar(s["selecao"]) in citadas
+        or _normalizar(s["selecao"]) in nomes_sel
+    ]
+    return {
+        "descricao": descricao,
+        "observacao_recorte": "Recorte da base: só os registros relacionados à pergunta.",
+        "edicoes": edicoes_sel,
+        "jogadores": [j for j in jogadores if j["ano"] in anos],
+        "selecoes": selecoes_sel,
+    }
+
+
 @app.get("/api/edicoes")
 def listar_edicoes():
     return jsonify(edicoes=[_edicao_completa(e) for e in FATOS.get("edicoes", [])])
@@ -193,12 +277,13 @@ def chat():
             _cache.move_to_end(chave)
             return jsonify(resposta=_cache[chave], cache=True)
 
-    contexto = "\n\n# BASE DE FATOS\n" + json.dumps(FATOS, ensure_ascii=False)
+    contexto = "\n\n# BASE DE FATOS\n" + json.dumps(montar_contexto(mensagem), ensure_ascii=False)
 
     try:
         resposta = get_client().chat.completions.create(
             model=MODEL,
             temperature=0.2,
+            max_completion_tokens=1500,
             messages=[
                 {"role": "system", "content": SYSTEM_PROMPT + contexto},
                 {"role": "user", "content": mensagem},
